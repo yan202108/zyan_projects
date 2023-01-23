@@ -1,16 +1,7 @@
 ---
-title: "Ask SubReddit Recommendation - Group 6"
+title: "Ask SubReddit Recommendation"
 ---
 
-
-## Team Members
-
-**Group 5**
-
-* Rajeswari Katta
-* Yan Zhou 
-* Sahiti Addanki
-* Siddartha Garikipati
 
 ## Business Context and Problem Description
 
