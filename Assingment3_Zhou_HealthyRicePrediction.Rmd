@@ -1,0 +1,400 @@
+---
+title: "Assingment3_Zhou_HealthyRicePrediction"
+author: "Yan Zhou"
+date: "11/18/2021"
+output: html_document
+```{r}
+library(keras)
+library(tidyverse)
+
+```
+# to store a sebset of data that we are going to use
+```{r}
+base_dir <- "rice_images/health_unhealth_total" # to store a sebset of data that we are going to use
+dir.create(base_dir)
+
+
+train_dir <- file.path(base_dir, "train")
+dir.create(train_dir)
+
+validation_dir <- file.path(base_dir, "validation")
+dir.create(validation_dir)
+
+test_dir <- file.path(base_dir, "test")
+dir.create(test_dir)
+```
+# create folders saving healthy images and unhealthy images
+```{r}
+train_health_dir <- file.path(train_dir, "health")
+dir.create(train_health_dir)
+train_unhealth_dir <- file.path(train_dir, "unhealth")
+dir.create(train_unhealth_dir)
+validation_health_dir <- file.path(validation_dir, "health")
+dir.create(validation_health_dir)
+validation_unhealth_dir <- file.path(validation_dir, "unhealth")
+dir.create(validation_unhealth_dir)
+test_health_dir <- file.path(test_dir, "health")
+dir.create(test_health_dir)
+test_unhealth_dir <- file.path(test_dir, "unhealth")
+dir.create(test_unhealth_dir)
+```
+
+# split healthy images 70% for training, 15% for validation and 15% for testing.
+```{r}
+
+num_health<-length(list.files("rice_images/_Healthy"))
+num_health_train <- ceiling(num_health*0.7)
+num_health_train
+num_health_validation <- ceiling(num_health*0.85)
+num_health_validation
+health_dataset_dir1 <- "rice_images/_Healthy"
+fnames <- paste0("shape ", 1:num_health_train, " .jpg")
+file.copy(file.path(health_dataset_dir1, fnames), file.path(train_health_dir))
+fnames <- paste0("shape ", (num_health_train + 1):num_health_validation, " .jpg")
+file.copy(file.path(health_dataset_dir1, fnames), file.path(validation_health_dir))
+fnames <- paste0("shape ", (num_health_validation + 1):num_health, " .jpg")
+file.copy(file.path(health_dataset_dir1, fnames), file.path(test_health_dir))
+
+```
+
+# copy original folder "_BrownSpot" to "new_BrownSpot" and rename the files in the folder "new_BrownSpot" 
+
+
+```{r}
+base_dir <- "rice_images/new_BrownSpot" # to store a sebset of data that we are going to use
+dir.create(base_dir)
+num_brown<-length(list.files("rice_images/_BrownSpot"))
+brown_dataset_dir<-"rice_images/_BrownSpot"
+fnames <- paste0("shape ", 1:num_brown, " .jpg")
+file.copy(file.path(brown_dataset_dir, fnames), file.path(base_dir))
+
+
+my_path <- "rice_images/new_BrownSpot/"
+file_names_old <- list.files(my_path)              # Get current file names
+file_names_new <- paste0("shape_brown ",               # Define new file names
+                         1:length(file_names_old),
+                         ".jpg")
+file.rename(paste0(my_path, file_names_old),       # Rename files
+            paste0(my_path, file_names_new))
+
+
+```
+# copy original folder "_Hispa" to "new_Hispa" and rename the files in the folder "new_Hispa"
+
+```{r}
+base_dir <- "rice_images/new_Hispa" # to store a sebset of data that we are going to use
+dir.create(base_dir)
+num_hispa<-length(list.files("rice_images/_Hispa"))
+hispa_dataset_dir<-"rice_images/_Hispa"
+fnames <- paste0("shape ", 1:num_hispa, " .jpg")
+file.copy(file.path(hispa_dataset_dir, fnames), file.path(base_dir))
+
+
+
+my_path <- "rice_images/new_Hispa/"
+file_names_old <- list.files(my_path)              # Get current file names
+file_names_new <- paste0("shape_hispa ",               # Define new file names
+                         1:length(file_names_old),
+                         ".jpg")
+file.rename(paste0(my_path, file_names_old),       # Rename files
+            paste0(my_path, file_names_new))
+            
+```
+
+# copy original folder "_LeafBlast" to "new__LeafBlast" and rename the files in the folder "new_LeafBlast"
+
+```{r}
+base_dir <- "rice_images/new_LeafBlast" # to store a sebset of data that we are going to use
+dir.create(base_dir)
+num_Leafblast<-length(list.files("rice_images/_LeafBlast"))
+leafblast_dataset_dir<-"rice_images/_LeafBlast"
+fnames <- paste0("shape ", 1:num_Leafblast, " .jpg")
+file.copy(file.path(leafblast_dataset_dir, fnames), file.path(base_dir))
+
+
+my_path <- "rice_images/new_LeafBlast/"
+file_names_old <- list.files(my_path)              # Get current file names
+file_names_new <- paste0("shape_leafblast ",               # Define new file names
+                         1:length(file_names_old),
+                         ".jpg")
+file.rename(paste0(my_path, file_names_old),       # Rename files
+            paste0(my_path, file_names_new))
+```
+Brownspot images: 70% for training, 15%for validation and 15% for testing
+Hispa images: 70% for training, 15%for validation and 15% for testing
+Leafblast images: 70% for training, 15%for validation and 15% for testing
+take all training data of Brownspot images, Hispa images,Leafblast images as unhealthy training data
+take all validation data of Brownspot images, Hispa images,Leafblast images as unhealthy validation data
+take all test data of Brownspot images, Hispa images,Leafblast images as unhealthy test data
+
+add files of new_LeafBlast into unhealthy folders
+```{r}
+unhealth_dataset_dir1 <- "rice_images/new_LeafBlast"
+
+num_unhealth<-length(list.files(unhealth_dataset_dir1))
+num_unhealth_train <- ceiling(num_unhealth*0.7)
+num_unhealth_train
+num_unhealth_validation <- ceiling(num_unhealth*0.85)
+num_unhealth_validation
+
+
+fnames <- paste0("shape_leafblast ", 1:num_unhealth_train, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(train_unhealth_dir))
+fnames <- paste0("shape_leafblast ", (num_unhealth_train + 1):num_unhealth_validation, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(validation_unhealth_dir))
+fnames <- paste0("shape_leafblast ", (num_unhealth_validation + 1):num_unhealth, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(test_unhealth_dir))
+
+```
+#add files of  _BrownSpot into unhealthy folders
+
+```{r}
+unhealth_dataset_dir1 <- "rice_images/new_BrownSpot"
+num_unhealth<-length(list.files(unhealth_dataset_dir1))
+num_unhealth_train <- ceiling(num_unhealth*0.7)
+num_unhealth_train
+num_unhealth_validation <- ceiling(num_unhealth*0.85)
+num_unhealth_validation
+
+
+fnames <- paste0("shape_brown ", 1:num_unhealth_train, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(train_unhealth_dir))
+fnames <- paste0("shape_brown ", (num_unhealth_train + 1):num_unhealth_validation, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(validation_unhealth_dir))
+fnames <- paste0("shape_brown ", (num_unhealth_validation + 1):num_unhealth, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(test_unhealth_dir))
+
+
+```
+#add files of  _Hispa into unhealthy folders
+```{r}
+unhealth_dataset_dir1 <- "rice_images/new_Hispa"
+num_unhealth<-length(list.files(unhealth_dataset_dir1))
+num_unhealth_train <- ceiling(num_unhealth*0.7)
+num_unhealth_train
+num_unhealth_validation <- ceiling(num_unhealth*0.85)
+num_unhealth_validation
+
+
+fnames <- paste0("shape_hispa ", 1:num_unhealth_train, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(train_unhealth_dir))
+fnames <- paste0("shape_hispa ", (num_unhealth_train + 1):num_unhealth_validation, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(validation_unhealth_dir))
+fnames <- paste0("shape_hispa ", (num_unhealth_validation + 1):num_unhealth, ".jpg")
+file.copy(file.path(unhealth_dataset_dir1, fnames), file.path(test_unhealth_dir))
+
+```
+
+# count how many pictures are in each split folder
+
+```{r}
+cat("total training health images:", length(list.files(train_health_dir)), "\n")
+cat("total validation health images:", length(list.files(validation_health_dir)), "\n")
+cat("total test health images:", length(list.files(test_health_dir)), "\n")
+
+
+cat("total training unhealth images:", length(list.files(train_unhealth_dir)), "\n")
+cat("total validation unhealth images:", length(list.files(validation_unhealth_dir)), "\n")
+cat("total test unhealth images:", length(list.files(test_unhealth_dir)), "\n")
+
+```            
+#Build CNN model
+```{r}
+library(keras)
+model_v1 <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+                input_shape = c(150, 150, 3)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+
+model_v1 %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(),
+  metrics = c("acc")
+)
+
+summary(model_v1)
+```
+#Data preprocessing
+```{r}
+train_datagen <- image_data_generator(rescale = 1/255)
+validation_datagen <- image_data_generator(rescale = 1/255)
+train_generator <- flow_images_from_directory(
+  train_dir, # Target directory
+  train_datagen, # Training data generator
+  target_size = c(150, 150), # Resizes all images to 150 × 150
+  batch_size = 20, # 20 samples in one batch
+  class_mode = "binary" # Because we use binary_crossentropy loss,
+  # we need binary labels.
+)
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  validation_datagen,
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+```
+
+#fit the model
+```{r, eval=FALSE}
+history_v1 <- model_v1 %>%
+  fit_generator(
+    train_generator,
+    steps_per_epoch = 50,
+    epochs = 20,
+    validation_data =
+      validation_generator,
+    validation_steps = 30
+  )
+
+
+model_v1 %>% save_model_hdf5("Assignment3-Zhou-RicePrediction-model-v1.h5")
+write_rds(history_v1, "Assignment3-Zhou-RicePrediction-history-v1.rds")
+plot(history_v1)
+```
+
+```{r}
+
+history_v1 <- read_rds("Assignment3-Zhou-RicePrediction-history-v1.rds")
+plot(history_v1)
+
+```
+#evaluate this model using the test data
+
+```{r}
+test_datagen <- image_data_generator(rescale = 1/255)
+
+test_generator <- flow_images_from_directory(
+  test_dir,
+  test_datagen, 
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+
+
+model_v1 <- load_model_hdf5("Assignment3-Zhou-RicePrediction-model-v1.h5")
+
+model_v1 %>% evaluate_generator(test_generator, steps = 50)
+
+```
+#Setting up a data augmentation configuration via image_data_generator
+```{r}
+datagen <- image_data_generator(
+  rescale = 1/255,
+  rotation_range = 40, # randomly rotate images up to 40 degrees
+  width_shift_range = 0.2, # randomly shift 20% pictures horizontally
+  height_shift_range = 0.2, # randomly shift 20% pictures vertically
+  shear_range = 0.2, # randomly apply shearing transformations
+  zoom_range = 0.2, # randomly zooming inside pictures
+  horizontal_flip = TRUE, # randomly flipping half the images horizontally
+  fill_mode = "nearest" # used for filling in newly created pixels
+)
+```
+#Defining a new convnet that includes dropout
+
+```{r}
+model_v2 <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3, 3), activation = "relu",
+                input_shape = c(150, 150, 3)) %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 64, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_conv_2d(filters = 128, kernel_size = c(3, 3), activation = "relu") %>%
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>%
+  layer_flatten() %>%
+  layer_dropout(rate = 0.5) %>% # randomly set 50% of weights to 0
+  layer_dense(units = 512, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+model_v2 %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_rmsprop(lr = 1e-4),
+  metrics = c("acc")
+)
+```
+#Training the convnet using data-augmentation generators:
+```{r}
+test_datagen <- image_data_generator(rescale = 1/255) # no data augmentation
+train_generator <- flow_images_from_directory(
+  train_dir,
+  datagen, # Our data augmentation configuration defined earlier
+  target_size = c(150, 150),
+  batch_size = 32,
+  class_mode = "binary"
+)
+validation_generator <- flow_images_from_directory(
+  validation_dir,
+  test_datagen, # Note that the validation data shouldn’t be augmented!
+  target_size = c(150, 150),
+  batch_size = 32,
+  class_mode = "binary"
+)
+
+```
+#fit the model
+```{r, eval=FALSE}
+history_v2 <- model_v2 %>% fit_generator(
+  train_generator,
+  steps_per_epoch = 100,
+  epochs = 50,
+  validation_data = validation_generator,
+  validation_steps = 50
+)
+
+
+model_v2 %>% save_model_hdf5("Assignment3-Zhou-RicePrediction-model-v2.h5")
+write_rds(history_v2, "Assignment3-Zhou-RicePrediction-history-v2.rds")
+plot(history_v2)
+
+```
+
+```{r}
+history_v2 <- read_rds("Assignment3-Zhou-RicePrediction-history-v2.rds")
+
+plot(history_v2)
+
+```
+
+#evaluate this model using the test data
+
+```{r}
+test_generator <- flow_images_from_directory(
+  test_dir,
+  test_datagen, 
+  target_size = c(150, 150),
+  batch_size = 20,
+  class_mode = "binary"
+)
+
+
+model_v2 <- load_model_hdf5("Assignment3-Zhou-RicePrediction-model-v2.h5")
+
+model_v2 %>% evaluate_generator(test_generator, steps = 50)
+            
+```
+                        
+                                    
+                                                
+                                                            
+                                                                        
+                                                                                    
+                                                                                                
+                                                                                                            
+                                                                                                                        
+                                                                                                                                    
+                                                                                                                                                
+                                                                                                                                                                        
+            
+            
