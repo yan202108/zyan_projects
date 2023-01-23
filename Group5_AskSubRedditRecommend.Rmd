@@ -1,0 +1,1070 @@
+---
+title: "Ask SubReddit Recommendation - Group 6"
+---
+
+
+## Team Members
+
+**Group 5**
+
+* Rajeswari Katta
+* Yan Zhou 
+* Sahiti Addanki
+* Siddartha Garikipati
+
+## Business Context and Problem Description
+
+Reddit is a platform for people of various interests to come together and share content like images , videos , memes and Q&A.
+
+We have built a model that will recommend a subreddit to get the best answers to your query from.
+
+*e.g ; What would happen if someone being starts killing off prosecutors and judges on their case like in the movie “Law Abiding Citizen” ?*
+
+*answers on r/explainlikeimfive = 1 answers on r/bestoflegaladvice = 6*
+
+**Goal** is to **help users get answers to their question from the subreddit** with more answers in other words , **the most relevant subreddit** for the users to expect an answer from.
+
+In this report, discussion regarding on how number of words are impacting the accuracy of the training models.
+In this case, in terms of **Title only data** vs **Title&Text Combo** of a post
+
+## Data Extraction 
+
+Data is extracted using the Reddit Data Extraction Toolkit and it lies within the CRAN Repository
+
+You simply need to pass the required params to the **find_thread_urls**
+
+* **sort_by** can have *top, rising, hot, new* as its params, and we have used all 4 of them to get enough data.
+* **subreddit** chosen as part of this project are picked from this reddit [post](https://www.reddit.com/r/redditlists/comments/1f08tj/list_and_multireddit_of_subreddits_for_asking/), 13 of them are choosen to train and test the model.
+* **period** interest (hour, day, week, month, year, all), we chose all for all subreddits to get enough content.
+
+
+All the data collected is part of this shared google drive [link](https://drive.google.com/drive/folders/1sHxFttdsny8hsv8PcWxESoxvWl9SPGWb), a lot of data is part of Recent Extracts  [folder](https://drive.google.com/drive/folders/1p_iqRhzf-mPdbOabVUNpJeHQf5dzAf4m)
+```{r,  eval=FALSE, echo=T}
+
+library(RedditExtractoR)
+
+csv_downloaded_path <- "data\\downloaded\\"
+
+urls <- find_thread_urls(subreddit="Ask_Politics", sort_by="new", period="all")
+
+threads_contents <- get_thread_content(urls$url)
+
+title_threads_contents <- threads_contents$threads
+
+write.csv(title_threads_contents,file.path(csv_downloaded_path,"Ask_Politics.csv"), row.names = FALSE)
+```
+
+### Disclaimer
+
+* The zipped contents have to be part of data folder
+* The csv files have to be part of data/downloaded folder
+* The glove.6B.50d.txt has to be in the current working directory of RMD file.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results='hide',echo=FALSE}
+library(kableExtra)
+library(keras)
+library(reticulate)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(skimr)
+library(data.table)
+library("wordcloud")
+library("tm")
+library("ggplot2")
+library("SnowballC")
+library("tidytext")
+py_config()
+py_discover_config("tensorflow")
+conda_list()
+use_condaenv("r-reticulate", required = T)
+```
+
+# Data Preprocessing in CSVs
+
+Select the list of subreddits*(name has to match the actual subreddit in the internet)*.
+```{r}
+subreddit_list<-c("AskAcademia","AskCulinary","AskGames",
+                  "askscience","legaladvice","relationship_advice",
+                  "tipofmytongue","AskHistorians","whatstheword",
+                  "explainlikeimfive","asktransgender","Ask_Politics",
+                  "AskEngineers")
+
+length(subreddit_list)
+
+
+```
+
+Point to the path where are downloaded csv files are unzipped
+```{r, warning=FALSE}
+csv_downloaded_path <- "data\\downloaded\\"
+
+subRedditFiles <- list.files(file.path(csv_downloaded_path),pattern = "*.csv", full.names = TRUE) 
+
+length(subRedditFiles)
+
+```
+
+
+Combine all the data into one data frame known as **redditDataCombined**
+
+**redditDataCombined** dataframe will have only 13 selected subreddits and non-duplicate values
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+redditDataCombined <- data.frame(title=character(),
+                                 text=character(),
+                                 subreddit=factor(),
+                                 author = character(),
+                                 score = double(),
+                                 upvotes=double(),
+                                 up_ratio=double(),
+                                 total_awards_received=double(),
+                                 comments=double())
+
+keep <- c("title","text","subreddit","upvotes","score","author",
+          "up_ratio","total_awards_received","comments")
+
+
+for(subRedditFile in subRedditFiles) {
+  df <- read_csv(subRedditFile) 
+  
+  df <- df[keep]
+  
+  df$upvotes <- as.double(df$upvotes)
+  df$score <- as.double(df$score)
+  df$up_ratio <- as.double(df$up_ratio)
+  df$upvotes <- as.double(df$upvotes)
+  df$total_awards_received <- as.double(df$total_awards_received)
+  df$comments <- as.double(df$comments)
+  
+  redditDataCombined <- bind_rows(redditDataCombined, df)
+} 
+
+redditDataCombined <- redditDataCombined %>% filter(subreddit %in% subreddit_list)
+
+redditDataCombined <- unique(redditDataCombined) 
+
+unique(redditDataCombined$subreddit)
+```
+
+
+A new attribute text_new is created to combine both text and title, training and testing of the models will be done on both title and text&title Combo.
+
+```{r}
+redditDataCombined$text_new <- ifelse(is.na(redditDataCombined$text),
+                                      redditDataCombined$title,
+                                      paste0(redditDataCombined$title,
+                                             redditDataCombined$text))
+```
+
+
+## Data Exploration 
+
+A **df_summary** will include the basic characteristics of each subreddit 
+
+```{r}
+df_subreddits_posts_count <- redditDataCombined %>% group_by(subreddit) %>% summarise(posts = n())
+df_subreddits_author <- redditDataCombined %>% group_by(subreddit) %>% summarise(authors = n_distinct(author))
+df_subreddits_comments <- redditDataCombined %>% group_by(subreddit) %>% summarise(tot_comments=sum(comments))
+df_subreddits_upratio <- redditDataCombined %>% group_by(subreddit) %>% summarise(up_ratio_ave=mean(up_ratio))
+
+df_summary<-merge(x = df_subreddits_posts_count, y = df_subreddits_author, by="subreddit")
+df_summary<-merge(x = df_summary, y = df_subreddits_upratio, by="subreddit")
+df_summary<-merge(x = df_summary, y = df_subreddits_comments, by="subreddit")
+```
+
+As per the data collected using RedditExtractorR
+
+* askscience, explainlikeimfive, relationship_advice has the highest number of comments 
+* tipofmytongue has the highest upvote ratio average of 90.9 and also it has highest number of distinct authors
+* AskEngineers had the least amount of posts collected
+
+Do note that subcomments ratio isn't considered as part of total comments.
+As we weren't able to gather much insights from this table, we will now try **word cloud**
+
+```{r}
+df_summary %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+```
+
+### Word Cloud 
+
+This [website](https://towardsdatascience.com/create-a-word-cloud-with-r-bde3e7422e8a) has been used as a reference to code world cloud generator 
+
+Here we define a word cloud generator function which will accept the subreddit name and display its cloud
+
+
+```{r}
+
+word_cloud_generator <- function(data) { 
+
+docs<- VCorpus(VectorSource(data))
+
+#Specify stopwords other than in-bult english stopwords
+skipwords = c("the","and","that","when","how","did","was","why","what","for","can","with","have",stopwords("en"))
+
+
+# Simple Transformation
+for (j in seq(docs))
+{
+  docs[[j]] = gsub("(RT|via)((?:\\b\\W*@\\w+)+)", "", docs[[j]])
+  docs[[j]] = gsub("@\\w+", "", docs[[j]])
+  docs[[j]] = gsub("http\\w+", "", docs[[j]])
+  docs[[j]] = gsub("[ \t]{2,}", "", docs[[j]])
+  docs[[j]] = gsub("^\\s+|\\s+quot;", "", docs[[j]])
+  docs[[j]] = gsub("[^\x20-\x7E]", "", docs[[j]])
+}
+
+kb.tf <- list(weighting = weightTf, 
+              removePunctuation = TRUE,
+              stopwords = skipwords,
+              tolower = TRUE,
+              minWordLength = 4,
+              removeNumbers = TRUE, stripWhitespace = TRUE,
+              stemDocument= TRUE)
+
+# term-document matrix
+docs <- tm_map(docs, PlainTextDocument) 
+tdm = TermDocumentMatrix(docs, control = kb.tf)
+# convert as matrix
+tdm = as.matrix(tdm)
+# get word counts in decreasing order
+word_freqs = sort(rowSums(tdm), decreasing=TRUE)
+# create a data frame with words and their frequencies
+dm = data.frame(word=names(word_freqs), freq=word_freqs)
+
+# Keep wordcloud the same
+set.seed(123)
+
+wordcloud(dm$word, dm$freq, random.order=FALSE, 
+          colors=brewer.pal(6, "Dark2"), min.freq=5, 
+          scale=c(6,.4),rot.per=.35,max.words=150)
+}
+```
+
+
+
+**AskAcademia Text Data**
+
+The text data's word cloud isn't as useful as anticipated, so for the sake of data exploration process, we will stick of word clouds of only title data.The stopwords have been removed, but it still hasn't improved our visuals.
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="AskAcademia")
+word_cloud_generator(df$text)
+```
+
+
+**AskAcademia Title Data**
+
+The expected word cloud of AskAcademia is spot on, the highly used words are phd, academia, research, professors, job, university. 
+This word cloud is a reliable indicator that our machine learning model will be able to predict and train with the best accuracy.
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="AskAcademia")
+word_cloud_generator(df$title)
+```
+
+
+
+**Ask_Politics**
+
+Not as many words as in AskAcademia but still helpful for our model to understand that bill, government, Biden, Trump, senate belong to the Ask_Politics subreddit. 
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="Ask_Politics")
+word_cloud_generator(df$title)
+```
+
+
+**askscience** 
+
+Covid is the most trending word in askscience due to this pandamic era. 
+The other useful and distinct words are the basic elements of nature earth, water, light and other forms of those ocean, sun, mars. 
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="askscience")
+word_cloud_generator(df$title)
+```
+
+**explainlikeimfive**  
+
+ELI5 is one of the most important keyword to ascertainexplainlikeimfive posts and it makes the ML training easy and biased.
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="explainlikeimfive")
+word_cloud_generator(df$title)
+```
+
+**AskHistorians** 
+As expected, the most talked history is mostly filled with keywords related to war (particularly world wars involving Nazi, America, Soviet Union, Europe) and unsuprisingly next most talked about are Romans.
+```{r, warning = FALSE}
+df <- redditDataCombined %>% filter(subreddit=="AskHistorians")
+word_cloud_generator(df$title)
+```
+
+
+## Data Transformation to .txt files within test, train folders
+
+This section of code will split only the title data from the csv file to its destination folders in .txt format
+
+The data will be extracted from *redditDataCombined.csv* from *title* column and stored within the *data/nlp_title* directory. 
+```{r, warning = FALSE}
+nlp_title_path <- "data\\nlp_title"
+
+
+dir.create(nlp_title_path)
+
+# Individual file folders for each subreddit
+for (subreddit in subreddit_list){
+  dir.create(file.path(nlp_title_path,subreddit), recursive=TRUE)  
+}
+
+#Outer Loop, to interate through all the subreddits' folders and assign file names.
+for (i in 1: length(subreddit_list)){
+  
+  df1 <- redditDataCombined %>% filter(subreddit==subreddit_list[i])
+  
+  file_names <- paste0(subreddit_list[i],"_", 1:length(df1$title),".txt",sep="")
+  
+  folder_path <- file.path(nlp_title_path, subreddit_list[i])
+  
+  
+  #Inner loop, Copying csv file's text data to its intended folder's file, repeated as per the total number of rows in filtered df
+  for (j in 1:length(df1$title)){
+    
+    write.table(df1$title[j],paste(file.path(folder_path,file_names[j])),col.names = FALSE, row.names = FALSE)}
+}
+```
+
+
+**SANITY CHECK**
+
+```{r}
+Total_posts <- 0
+
+for(subreddit in subreddit_list) {
+  
+  subreddit_file_path <- file.path(nlp_title_path,subreddit)
+  
+  message <- paste0(subreddit," files ")
+  
+  totalSubredditPosts <- length(list.files(subreddit_file_path))
+  
+  Total_posts <- Total_posts + totalSubredditPosts
+  
+  cat(message,totalSubredditPosts, "\n")
+}
+
+Total_posts
+
+length(redditDataCombined$title)
+```
+
+
+### Split data into Test and Train folders
+
+
+**Train Folder**
+```{r, warning = FALSE}
+#Create train folder in the required path
+nlp_title_train_path <- file.path(nlp_title_path,"train")
+
+dir.create(nlp_title_train_path)
+
+for (i in 1:length(subreddit_list)){
+  
+  subreddit_train_file_path <- file.path(nlp_title_train_path, subreddit_list[i])
+  
+  # Creating 13 subreddit folders within train path
+  dir.create(subreddit_train_file_path)
+  
+  subreddit_file_path <- file.path(nlp_title_path, subreddit_list[i])
+  
+  files  <- list.files(subreddit_file_path)
+  
+  #To get the total number of posts which are in form of txt files
+  num_file <- length(files)
+  
+  #To split first 80% of the data into Train folder, data in train folder will be further split to train and validation in test sequencing
+  num_file_train <- ceiling(num_file*0.8)
+  
+  for (j in 1:num_file_train){
+    
+    file.copy(file.path(subreddit_file_path, files[j],sep=""),  subreddit_train_file_path)
+  }
+}
+```
+
+**Test Folder**
+
+```{r}
+#Create train folder in the required path
+nlp_title_test_path <- file.path(nlp_title_path,"test")
+
+dir.create(nlp_title_test_path)
+
+for (i in 1:length(subreddit_list)){
+  
+  subreddit_test_file_path <- file.path(nlp_title_test_path, subreddit_list[i])
+  
+  dir.create(subreddit_test_file_path)
+  
+  subreddit_file_path <- file.path(nlp_title_path, subreddit_list[i])
+  
+  files  <- list.files(subreddit_file_path)
+  
+  num_file <- length(files)
+  
+  #To split remaining 20% of the data into test folder.
+  num_file_train <- ceiling(num_file*0.8)
+  
+  for (j in (num_file_train+1):num_file) {
+    
+    file.copy(file.path(subreddit_file_path, files[j],sep=""),  subreddit_test_file_path)
+  }
+}
+```
+
+**SANITY CHECK**
+```{r}
+
+lengthOftrainSet <- 0
+
+lengthOftestSet <- 0
+
+for(subreddit in subreddit_list) {
+  
+  train_folder <- file.path(nlp_title_train_path, subreddit)
+  message <- paste0(subreddit," posts in training:")
+  lengthOftrainSet <- lengthOftrainSet + length(list.files(train_folder))
+  cat(message, length(list.files(train_folder)), "\n")
+  
+  test_folder <- file.path(nlp_title_test_path, subreddit)
+  message <- paste0(subreddit," posts in test:")
+  lengthOftestSet <- lengthOftestSet + length(list.files(test_folder))
+  cat(message, length(list.files(test_folder)), "\n")
+}
+
+lengthOftestSet
+
+lengthOftrainSet
+
+TotalData <- lengthOftestSet + lengthOftrainSet
+
+TotalData
+
+length(redditDataCombined$title)
+```
+
+
+### Data Tranformation for NLP with Title&Text Combination
+
+The data will be extracted from *redditDataCombined.csv* from *text_new* column and stored within the *data/nlp_text* directory. 
+```{r}
+nlp_text_path <- "data\\nlp_text"
+
+dir.create(nlp_text_path)
+```
+
+For the sake of simplicity, the code for this section will be hidden from HTML file. The code is available in the RMD.
+
+```{r, results='hide',echo=FALSE}
+for (subreddit in subreddit_list){
+  dir.create(file.path(nlp_text_path,subreddit), recursive=TRUE)  
+}
+
+
+for (i in 1: length(subreddit_list)){
+  
+  df1 <- redditDataCombined %>% filter(subreddit==subreddit_list[i])
+  
+  file_names <- paste0(subreddit_list[i],"_", 1:length(df1$text_new),".txt",sep="")
+  
+  folder_path <- file.path(nlp_text_path, subreddit_list[i])
+  
+  for (j in 1:length(df1$text_new)){
+    
+    write.table(df1$text_new[j],paste(file.path(folder_path,file_names[j])),col.names = FALSE, row.names = FALSE)}
+}
+
+
+# SANITY CHECK
+
+Total_posts <- 0
+
+for(subreddit in subreddit_list) {
+  
+  subreddit_file_path <- file.path(nlp_text_path,subreddit)
+  
+  message <- paste0(subreddit," files ")
+  
+  totalSubredditPosts <- length(list.files(subreddit_file_path))
+  
+  Total_posts <- Total_posts + totalSubredditPosts
+  
+  cat(message,totalSubredditPosts, "\n")
+}
+
+Total_posts
+
+length(redditDataCombined$text_new)
+
+
+#SPLIT DATA INTO TEST AND TRAIN 
+
+# TRAIN 
+
+nlp_text_train_path <- file.path(nlp_text_path,"train")
+
+dir.create(nlp_text_train_path)
+
+for (i in 1:length(subreddit_list)){
+  
+  subreddit_train_file_path <- file.path(nlp_text_train_path, subreddit_list[i])
+  
+  dir.create(subreddit_train_file_path)
+  
+  subreddit_file_path <- file.path(nlp_text_path, subreddit_list[i])
+  
+  
+  files  <- list.files(subreddit_file_path)
+  
+  num_file <- length(files)
+  
+  num_file_train <- ceiling(num_file*0.8)
+  
+  for (j in 1:num_file_train){
+    
+    file.copy(file.path(subreddit_file_path, files[j],sep=""),  subreddit_train_file_path)
+    }
+}
+
+
+# TEST
+
+nlp_text_test_path <- file.path(nlp_text_path,"test")
+
+dir.create(nlp_text_test_path)
+
+for (i in 1:length(subreddit_list)){
+  
+  subreddit_test_file_path <- file.path(nlp_text_test_path, subreddit_list[i])
+  
+  dir.create(subreddit_test_file_path)
+  
+  subreddit_file_path <- file.path(nlp_text_path, subreddit_list[i])
+  
+  files  <- list.files(subreddit_file_path)
+  
+  num_file <- length(files)
+  
+  num_file_train <- ceiling(num_file*0.8)
+  
+  for (j in (num_file_train+1):num_file) {
+    
+    file.copy(file.path(subreddit_file_path, files[j],sep=""),  subreddit_test_file_path)
+    }
+}
+
+
+#SANITY CHECK 
+
+
+lengthOftrainSet <- 0
+
+lengthOftestSet <- 0
+
+for(subreddit in subreddit_list) {
+  
+  train_folder <- file.path(nlp_text_train_path, subreddit)
+  message <- paste0(subreddit," posts in training:")
+  lengthOftrainSet <- lengthOftrainSet + length(list.files(train_folder))
+  cat(message, length(list.files(train_folder)), "\n")
+  
+  test_folder <- file.path(nlp_text_test_path, subreddit)
+  message <- paste0(subreddit," posts in test:")
+  lengthOftestSet <- lengthOftestSet + length(list.files(test_folder))
+  cat(message, length(list.files(test_folder)), "\n")
+}
+
+lengthOftestSet
+
+lengthOftrainSet
+
+TotalData <- lengthOftestSet + lengthOftrainSet
+
+TotalData
+
+length(redditDataCombined$text_new)
+
+```
+
+
+
+# DATA PADDING AND EMBEDDING FOR NLP
+
+### This is a Multiclass, single-label classification problem and here train data's labels of the raw subreddit posts' data is processed.
+```{r}
+train_dir <- file.path("data\\nlp_title\\train")
+
+
+labels <- c()
+texts <- c()
+for (label_type in subreddit_list) {
+  
+  label <- switch(label_type, AskAcademia = 0,
+                  askscience = 3,AskCulinary = 1, AskGames = 2,
+                  legaladvice = 4, relationship_advice = 5, tipofmytongue= 6,
+                  AskHistorians = 7, whatstheword = 8, explainlikeimfive = 9, asktransgender = 10,
+                  Ask_Politics = 11, AskEngineers = 12)
+  
+  dir_name <- file.path(train_dir, label_type)
+  for (fname in list.files(dir_name, pattern = glob2rx("*.txt"),
+                           full.names = TRUE)) {
+    texts <- c(texts, readChar(fname, file.info(fname)$size))
+    labels <- c(labels, label)
+  }
+}
+```
+
+
+### Tokenizing the text of the raw subreddit title post data:
+
+```{r}
+max_words <- 10000 # only consider the 10k most common words
+maxlen <- 50 # only consider the first 50 words in each post Title
+
+lengthOftrainSet
+
+training_samples <- 18759 # only use 18759 out of 24759 post to train our model
+validation_samples <- 6000
+
+
+tokenizer <- text_tokenizer(num_words = max_words) %>%
+  fit_text_tokenizer(texts)
+sequences <- texts_to_sequences(tokenizer, texts)
+word_index = tokenizer$word_index
+cat("Found", length(word_index), "unique tokens.\n")
+
+data <- pad_sequences(sequences, maxlen = maxlen)
+labels <- as.array(labels)
+cat("Shape of data tensor (Num Docs, Num Words in a Doc):", dim(data), "\n")
+
+cat('Shape of label tensor (Num Docs):', dim(labels), "\n")
+```
+
+### Creating a training set and a validation set:
+
+```{r}
+set.seed(123)
+indices <- sample(1:nrow(data))
+training_indices <- indices[1:training_samples]
+validation_indices <- indices[(training_samples + 1):
+                                (training_samples + validation_samples)]
+x_train <- data[training_indices,]
+y_train <- labels[training_indices]
+x_val <- data[validation_indices,]
+y_val <- labels[validation_indices]
+```
+
+
+### Preprocessing the embeddings
+
+glove.6B.50d.txt file must be at the same working directory as this RMD
+```{r}
+
+lines <- readLines("glove.6B.50d.txt")
+embeddings_index <- new.env(hash = TRUE, parent = emptyenv())
+for (i in 1:length(lines)) {
+  line <- lines[[i]]
+  values <- strsplit(line, " ")[[1]]
+  word <- values[[1]]
+  embeddings_index[[word]] <- as.double(values[-1])
+} 
+
+cat("Found", length(embeddings_index), "word vectors.\n")
+
+```
+
+### Building an embedding Matrix
+
+```{r}
+embedding_dim <- 50
+embedding_matrix <- array(0, dim = c(max_words, embedding_dim)) # 10k x 50
+for (word in names(word_index)) { # for every word
+  index <- word_index[[word]] # get its index
+  if (index < max_words) { # only consider the top 10k words
+    # get the word's embedding vector from GloVe
+    embedding_vector <- embeddings_index[[word]]
+    if (!is.null(embedding_vector)) { # if GloVe has the embedding vector
+      # index 1 isn't supposed to stand for any word or token
+      # --it's a placeholder. So we skip 1 here:
+      embedding_matrix[index+1,] <- embedding_vector
+    }
+  }
+}
+```
+
+
+### Test Data Padding for title Data
+```{r}
+test_dir <- file.path("data\\nlp_title\\test")
+test_labels <- c()
+test_texts <- c()
+for (label_type in subreddit_list) {
+  
+  label <- switch(label_type, AskAcademia = 0,
+                  askscience = 3,AskCulinary = 1, AskGames = 2,
+                  legaladvice = 4, relationship_advice = 5, tipofmytongue= 6,
+                  AskHistorians = 7, whatstheword = 8, explainlikeimfive = 9, asktransgender = 10,
+                  Ask_Politics = 11, AskEngineers = 12)
+  
+  dir_name <- file.path(test_dir, label_type)
+  for (fname in list.files(dir_name, pattern = glob2rx("*.txt"),
+                           full.names = TRUE)) {
+    test_texts <- c(test_texts, readChar(fname, file.info(fname)$size))
+    test_labels <- c(test_labels, label)
+  }
+}
+sequences <- texts_to_sequences(tokenizer, test_texts)
+x_test <- pad_sequences(sequences, maxlen = maxlen)
+y_test <- as.array(test_labels)
+```
+
+### Test Data Padding for Title Data
+```{r}
+maxlen_text <- 450 # consider the first 450 words in each post for Text and Title Combo
+### Test Data Padding 
+test_dir <- file.path("data\\nlp_text\\test")
+test_labels <- c()
+test_texts <- c()
+for (label_type in subreddit_list) {
+  
+  label <- switch(label_type, AskAcademia = 0,
+                  askscience = 3,AskCulinary = 1, AskGames = 2,
+                  legaladvice = 4, relationship_advice = 5, tipofmytongue= 6,
+                  AskHistorians = 7, whatstheword = 8, explainlikeimfive = 9, asktransgender = 10,
+                  Ask_Politics = 11, AskEngineers = 12)
+  
+  dir_name <- file.path(test_dir, label_type)
+  for (fname in list.files(dir_name, pattern = glob2rx("*.txt"),
+                           full.names = TRUE)) {
+    test_texts <- c(test_texts, readChar(fname, file.info(fname)$size))
+    test_labels <- c(test_labels, label)
+  }
+}
+sequences <- texts_to_sequences(tokenizer, test_texts)
+x_test_text <- pad_sequences(sequences, maxlen = maxlen_text)
+```
+
+
+
+# MODELS 
+
+The zip file of rds and h2 files (total 12) has to be unzipped under data folder for this RMD file to knit.
+
+## 1. LSTM
+
+Long Short Term Memory networks – usually just called “LSTMs” – are a special kind of RNN, capable of learning long-term dependencies.
+The repeating module in an LSTM contains four interacting layers.
+
+
+### 1.1 Building the network
+
+The network will learn 32-dimensional embeddings for each of the 3000 words (max features), turn
+the input integer sequences (2D integer tensor) into embedded sequences (3D float tensor).
+Spatial dropout will drop entire 1D feature maps instead of individual elements.
+Because it is a multi class classification, 13 units are required along with the softmax activation function.
+
+```{r}
+LSTM_Model <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen, # changed to maxlen_text to train TitleText Combo Data
+                  output_dim = embedding_dim) %>%
+  layer_spatial_dropout_1d(rate=0.1) %>%
+  layer_lstm(units = 50, activation = "relu", return_sequences = FALSE) %>%
+  layer_dense(units = 13, activation = "softmax")
+
+summary(LSTM_Model)
+```
+
+### 1.2 Loading pretrained word embeddings into the embedding layer and train the rest (this section of code won't be run)
+
+Compile the Model
+* RMSprop: is an optimizer uses a decaying average of partial gradients in the adaptation of the step size for each parameter. <br />
+* Sparse cross entropy: compares each of the predicted probabilities to actual class output which are between 0 to 12. <br />
+* Acc(Accuracy): The Accuracy metric you’re trying to optimize. <br />
+
+Training
+* Epochs (20), training the neural network with all the training data for 20 cycles. <br />
+* batch size (32) is the number of samples that will be propagated through the network. <br />
+* validation_split (0.2), 20% of training data will be used for validation. <br />
+
+The history and model is saved in the local computer and are part of the zip file shared with the report
+```{r, eval =FALSE}
+
+get_layer(LSTM_Model, index = 1) %>% # manually configure the embedding layer
+  set_weights(list(embedding_matrix)) %>% # set the weights based on GloVe
+  freeze_weights() # do not update the weights in this layer anymore
+
+
+LSTM_Model <- LSTM_Model %>% compile(
+  optimizer = "rmsprop",
+  loss = "sparse_categorical_crossentropy",
+  metrics = c("acc")
+)
+
+
+LSTM_History <- LSTM_Model %>% fit(
+  x_train, y_train,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+
+#WRITE
+write_rds(LSTM_History, file.path("data", "LSTM_History.rds"))
+
+LSTM_Model %>% save_model_hdf5(file.path("data","LSTM_Model.h5"))
+
+```
+
+### 1.3 Read and Plot the training history of Title
+```{r}
+LSTM_History <- readRDS(file.path("data", "LSTM_History_Title.rds"))
+
+plot(LSTM_History)
+```
+
+### 1.4 EVALUATE Title Data
+```{r}
+LSTM_Model <- load_model_hdf5(file.path("data", "LSTM_Model_Title.h5"))
+
+LSTM_Acc_Title <- LSTM_Model %>%
+  evaluate(x_test, y_test)
+```
+
+### 1.5 Read and Plot the training history of text
+```{r}
+LSTM_History<- readRDS(file.path("data", "LSTM_History_Text.rds"))
+
+plot(LSTM_History)
+```
+
+### 1.6 EVALUATE text Data
+```{r}
+LSTM_Model<- load_model_hdf5(file.path("data", "LSTM_Model_Text.h5"))
+
+
+LSTM_Acc_Text <- LSTM_Model %>%
+  evaluate(x_test_text, y_test)
+```
+
+
+
+## 2. GRU
+
+Gated Recurrent Units are a gating mechanism in rnn. It is like a long short-term memory (LSTM) with a forget gate, but has fewer parameters than LSTM, as it lacks an output gate.
+Gru aims to solve the vanishing gradient problem which comes with a standard recurrent neural network. GRU can also be considered as a variation on the LSTM because both are designed similarly and, in some cases, produce equally excellent results.
+
+### 2.1 Building the network
+
+Will be build the same way as LSTM's but with GRU's units
+```{r}
+GRU_Model <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen,  # changed to maxlen_text to train TitleText Combo Data
+                  output_dim = embedding_dim) %>%
+  layer_spatial_dropout_1d(rate=0.1) %>%
+  layer_gru(units = 50, activation = "relu", return_sequences = FALSE) %>%
+  layer_dense(units = 13, activation = "softmax")
+
+summary(GRU_Model)
+```
+
+### 2.2 Loading pretrained word embeddings into the embedding layer and train the rest (this section of code won't be run)
+
+Compiled the Model and trained it the same way as LSTM's.
+The history and model is saved in the local computer and are part of the zip file shared with the report
+```{r, eval =FALSE}
+
+
+get_layer(GRU_Model, index = 1) %>% # manually configure the embedding layer
+  set_weights(list(embedding_matrix)) %>% # set the weights based on GloVe
+  freeze_weights() # do not update the weights in this layer anymore
+
+
+GRU_History <- GRU_Model %>% compile(
+  optimizer = "rmsprop",
+  loss = "sparse_categorical_crossentropy",
+  metrics = c("acc")
+)
+
+
+GRU_History <- GRU_Model %>% fit(
+  x_train, y_train,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+#WRITE
+write_rds(GRU_History, file.path("data", "GRU_History.rds"))
+
+GRU_Model %>% save_model_hdf5(file.path("data","GRU_Model.h5"))
+
+
+```
+
+### 2.3 Read and Plot the training history for Title Data
+```{r}
+GRU_History_Title <- readRDS(file.path("data", "GRU_History_Title.rds"))
+
+plot(GRU_History_Title)
+```
+
+### 2.4 EVALUATE Title Data
+```{r}
+GRU_Model_Title <- load_model_hdf5(file.path("data", "GRU_Model_Title.h5"))
+
+GRU_Acc_Title <- GRU_Model_Title %>%
+  evaluate(x_test, y_test)
+```
+
+### 2.5 Read and Plot the training history for Title&Text Combo Data
+```{r}
+GRU_History <- readRDS(file.path("data", "GRU_History_Text.rds"))
+
+plot(GRU_History)
+```
+
+### 2.6 EVALUATE Title&Text Combo Data
+```{r}
+GRU_Model <- load_model_hdf5(file.path("data", "GRU_Model_Text.h5"))
+
+GRU_Acc_Text <- GRU_Model %>%
+  evaluate(x_test_text, y_test)
+```
+
+
+
+
+## 3. 1D covnet
+
+Convnets are a type of deep neural networks that have been extensively used in
+computer vision applications.
+1D convnets are used for text and numeric values while 2D is used for images and videos.
+
+
+### 3.1 Building the network
+
+
+The number of channels is controlled by filters (32), the first argument
+passed to layer_conv_2d.
+The output of every layer_conv_2d and layer_max_pooling_2d is a 1D in case of nlp.
+The role of max pooling is to aggressively "downsample" the output from the previous layer
+Kernal size is used for  for 'feature extraction'.
+
+
+```{r}
+CONVNET_Model <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen,
+                  output_dim = embedding_dim) %>%
+  layer_spatial_dropout_1d(rate=0.1) %>%
+  layer_conv_1d(filters = 32, kernel_size = 7, activation = "relu") %>%
+  layer_max_pooling_1d(pool_size = 5) %>%
+  layer_conv_1d(filters = 32, kernel_size = 7, activation = "relu") %>%
+  layer_global_max_pooling_1d() %>%
+  layer_dense(units = 13, activation = "softmax")
+
+summary(CONVNET_Model)
+```
+
+### 3.2 Loading pretrained word embeddings into the embedding layer and train the rest (this section of code won't be run)
+
+Compiled the Model and trained it the same way as LSTM's.
+The history and model is saved in the local computer and are part of the zip file shared with the report
+```{r, eval =FALSE}
+
+get_layer(CONVNET_Model, index = 1) %>% # manually configure the embedding layer
+  set_weights(list(embedding_matrix)) %>% # set the weights based on GloVe
+  freeze_weights() # do not update the weights in this layer anymore
+
+
+CONVNET_History <- CONVNET_Model %>% compile(
+  optimizer = "rmsprop",
+  loss = "sparse_categorical_crossentropy",
+  metrics = c("acc")
+)
+
+
+CONVNET_History <- CONVNET_Model %>% fit(
+  x_train, y_train,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(x_val, y_val)
+)
+
+#WRITE
+write_rds(CONVNET_History, file.path("data", "Convnet_History.rds"))
+CONVNET_Model %>% save_model_hdf5(file.path("data","Convnet_Model.h5"))
+```
+
+### 3.3 Read and Plot the training history with Title Data
+```{r}
+CONVNET_History <- readRDS(file.path("data", "Convnet_History_Title.rds"))
+
+plot(CONVNET_History)
+```
+
+### 3.4 EVALUATE model with Title Data
+```{r}
+CONVNET_Model <- load_model_hdf5(file.path("data", "Convnet_Model_Title.h5"))
+
+CONVNET_Acc_Title <- CONVNET_Model %>%
+  evaluate(x_test, y_test)
+```
+
+
+### 3.5 Read and Plot the training history of Title&Text Combo
+```{r}
+CONVNET_History <- readRDS(file.path("data", "Convnet_History_Text.rds"))
+
+plot(CONVNET_History)
+```
+
+### 3.6 EVALUATE Model with Title&Text Combo
+```{r}
+CONVNET_Model <- load_model_hdf5(file.path("data", "Convnet_Model_Text.h5"))
+
+CONVNET_Acc_Text <- CONVNET_Model %>%
+  evaluate(x_test_text, y_test)
+```
+
+
+
+## Conclusion
+
+Combining Results
+```{r}
+model_name <- c("LSTM Title", "GRU Title", "1D Convnet Title", "LSTM Text", "GRU Text", "1D Convnet Text")
+
+scores <- c(LSTM_Acc_Title["acc"], GRU_Acc_Title["acc"], CONVNET_Acc_Title["acc"],
+            LSTM_Acc_Text["acc"], GRU_Acc_Text["acc"], CONVNET_Acc_Text["acc"])
+
+scores <-  round(scores*100, digits=2)
+
+summary <- tibble(Model = model_name, AccuracyPercentage = scores)
+
+summary %>%
+  kbl() %>%
+  kable_paper("hover", full_width = F)
+```
+
+
+### Findings:
+* Accuracy of only Title training models with its Title only test datagave a much higher accuracy.
+* Adding extra units (14 convnet unit filters) to 1D convnet still gave lesser accuracy of 64% with a difference of 10% with GRU, LSTM (in case of subreddit's title post modelling).
+* Adding one layer of spatial drop out of 10% to every model resulted in lesser over fitting issue.
+* LSTM and GRU have close accuracy results in case of less number of words i.e, only title data.
+* All the models have less than 10% accuracy when large number of words are considered (subreddit post's title&text modelling)
+* GRU, 1D convnet did a slightly better job with when large number of words are considered (subreddit post's title&text modelling).
+* Assumption: Accuracy might be improved for text&combo if data is trained after filtering out stopwords.
