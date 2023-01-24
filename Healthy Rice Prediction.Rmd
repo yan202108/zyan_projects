@@ -1,5 +1,5 @@
 ---
-title: "Assingment3_Zhou_HealthyRicePrediction"
+title: "Zhou_HealthyRicePrediction"
 author: "Yan Zhou"
 date: "11/18/2021"
 output: html_document
