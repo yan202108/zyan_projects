@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+```{r,message=FALSE, warning=FALSE}
+library(tidyverse)
+library(wordcloud)
+library(tidytext)
+library(SnowballC)
+library(ggplot2)
+library(Hmisc)
+library(kableExtra)
+library(dplyr)
+```
+Import the file
+```{r}
+setwd("~/Desktop/MSIS/LA/Texure project")
+df_raw<-read.csv("To_Unique_Cleaning_ENI 3101_Personality_Assessment_Survey_1216.csv")
+```
+Delte the row of missing value in "Group_link"
+```{r}
+df_q9<-select(df_raw, c("ID", "Group_link", "Q9" ))
+
+df<-df_q9 %>% filter (Group_link != "#N/A" )
+```
+Tokenizing the text and remove the stop words
+```{r}
+
+removed_words<-c("1","2","people","feel",
+                 "personality","coworkers","tend","workplace","creative")
+tidy_df <- df %>%
+  mutate(line = row_number()) %>%
+  unnest_tokens(word, Q9) %>%
+  anti_join(stop_words) %>% 
+  filter(word %nin% removed_words) 
+```
+Display the word occurrences
+```{r}
+tidy_df %>%
+  count(word, sort = TRUE)
+```
+Display the word occurrences of each group
+```{r}
+group_list<-unique(tidy_df$Group_link)
+df_new<-data.frame()
+for (i in group_list){
+   df_n<-tidy_df %>%
+           filter(Group_link==i) %>% 
+           count(Group_link,word, sort = TRUE)
+   df_new<-rbind(df_new, df_n)
+  
+}
+kbl(head(df_new,n=20)) %>%
+kable_styling(bootstrap_options = c("striped","hover"))
+
+```
+Plot the word occurences of each group
+```{r}
+  df_new %>%
+  filter(Group_link==group_list[1]) %>%
+  slice(1:10) %>% 
+  ggplot(aes(reorder(word, n),n,color= word)) +
+  geom_bar(stat="identity", width=.5,fill =     
+             "white",show.legend = FALSE) +
+  coord_flip()+
+  labs(title=paste(group_list[1],"Top 10 Words Occurences") )
+```
+world cloud
+```{r,warning=FALSE}
+df_new_group1<-tidy_df %>%
+  filter(Group_link==group_list[1]) 
+cleaned_tokens<-data.frame(word=df_new_group1$word)
+# Define a color palette
+pal <- brewer.pal(8,"Dark2")
+# Plot the 100 most common words
+cleaned_tokens %>%
+  count(word) %>%
+  with(wordcloud(word, n, random.order = FALSE, max.words = 100, colors=pal))
+
+```
+The Second Group
+```{r}
+df_new %>%
+  filter(Group_link==group_list[2]) %>%
+  slice(1:10) %>% 
+  ggplot(aes(reorder(word, n),n,color= word)) +
+  geom_bar(stat="identity", width=.5,fill =     
+             "white",show.legend = FALSE) +
+  coord_flip()+
+  labs(title=paste(group_list[2],"Top 10 Words Occurences") )
+```
+world cloud
+```{r,warning=FALSE}
+df_new_group2<-tidy_df %>%
+  filter(Group_link==group_list[2]) 
+cleaned_tokens<-data.frame(word=df_new_group2$word)
+# Define a color palette
+pal <- brewer.pal(8,"Dark2")
+# Plot the 100 most common words
+cleaned_tokens %>%
+  count(word) %>%
+  with(wordcloud(word, n, random.order = FALSE, max.words = 100, colors=pal))
+
+```
+
+The Third Group
+```{r}
+df_new %>%
+  filter(Group_link==group_list[3]) %>%
+  slice(1:10) %>% 
+  ggplot(aes(reorder(word, n),n,color= word)) +
+  geom_bar(stat="identity", width=.5,fill =     
+             "white",show.legend = FALSE) +
+  coord_flip()+
+  labs(title=paste(group_list[3],"Top 10 Words Occurences") )
+```
+world cloud
+```{r,warning=FALSE}
+df_new_group3<-tidy_df %>%
+  filter(Group_link==group_list[3]) 
+cleaned_tokens<-data.frame(word=df_new_group3$word)
+# Define a color palette
+pal <- brewer.pal(8,"Dark2")
+# Plot the 100 most common words
+cleaned_tokens %>%
+  count(word) %>%
+  with(wordcloud(word, n, random.order = FALSE, max.words = 100, colors=pal))
+
+```
+The Fourth Group
+```{r}
+df_new %>%
+  filter(Group_link==group_list[4]) %>%
+  slice(1:10) %>% 
+  ggplot(aes(reorder(word, n),n,color= word)) +
+  geom_bar(stat="identity", width=.5,fill =     
+             "white",show.legend = FALSE) +
+  coord_flip()+
+  labs(title=paste(group_list[4],"Top 10 Words Occurences") )
+```
+world cloud
+```{r,warning=FALSE}
+df_new_group4<-tidy_df %>%
+  filter(Group_link==group_list[4]) 
+cleaned_tokens<-data.frame(word=df_new_group4$word)
+# Define a color palette
+pal <- brewer.pal(8,"Dark2")
+# Plot the 100 most common words
+cleaned_tokens %>%
+  count(word) %>%
+  with(wordcloud(word, n, random.order = FALSE, max.words = 100, colors=pal))
+```
+
+
+
+
+
+
+
+
